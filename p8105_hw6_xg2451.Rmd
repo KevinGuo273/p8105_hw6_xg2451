@@ -1,0 +1,114 @@
+---
+title: "p8105_hw6_xg2451"
+output: github_document
+---
+
+# Problem 1
+
+```{r message=FALSE}
+library(dplyr)
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") |> 
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) |> 
+  select(name, id, everything())
+```
+#### Perform Bootstrap Sampling and Fit Linear Regression Models
+```{r message=FALSE}
+library(tidyr)
+library(modelr)
+library(tidyverse)
+library(purrr)
+library(broom)
+
+set.seed(123)
+boot_fit <- weather_df |> 
+  modelr::bootstrap(n = 5000)  |> 
+  mutate(
+    models = map(strap, \(df) lm(tmax ~ tmin, data = df)),
+    # Extract regression coefficients
+    results = map(models, broom::tidy),
+    # Extract model summary statistics r^2
+    glance = map(models, broom::glance)
+  ) |> 
+  select(-strap, -models)
+```
+
+#### Extract and Compute $r^2$ and log($\hat{\beta}_0\times\hat{\beta}_1$)
+```{r}
+boot_summary <- boot_fit |> 
+  mutate(
+    # Extract r^2 
+    r_squared = map_dbl(glance, \(g) g$r.squared),
+    # Compute log(beta0 * beta1)
+    log_beta_product = map_dbl(results, \(res) {
+      beta_0 <- res |> filter(term == "(Intercept)") |> pull(estimate)
+      beta_1 <- res |> filter(term == "tmin") |> pull(estimate)
+      log(beta_0 * beta_1)
+    })
+  )
+```
+
+#### Plot the Distributions of $r^2$ and log($\hat{\beta}_0\times\hat{\beta}_1$)
+```{r}
+library(ggplot2)
+# Plot the distribution of r^2
+ggplot(data = data.frame(r_squared = boot_summary$r_squared), aes(x = r_squared)) +
+  geom_density() +
+  labs(
+    title = "Distribution of r-squared",
+    x = "r-squared",
+    y = "Density"
+  )
+```
+```{r}
+# Plot the distribution of log(beta0 * beta1)
+ggplot(data = data.frame(log_beta_product = boot_summary$log_beta_product), aes(x = log_beta_product)) +
+  geom_density() +
+  labs(
+    title = "Distribution of log(beta0 * beta1)",
+    x = "log(beta0 * beta1)",
+    y = "Density"
+  )
+```
+
+**Description:**
+
+Both distributions show relatively low variability, indicating that the regression model's performance metrics and parameter estimates are stable under resampling. The high concentration of $r^2$ near 0.92 confirms a strong model fit, while the narrow range of log($\hat{\beta}_0\times\hat{\beta}_1$) implies consistent relationships between the predictor and response.
+ 
+#### Compute 95% Confidence Intervals
+
+```{r}
+r_squared_ci <- quantile(boot_summary$r_squared, c(0.025, 0.975))
+log_beta_product_ci <- quantile(boot_summary$log_beta_product, c(0.025, 0.975))
+```
+For estimates of \(r^2\), the 95% confidence interval is `r sprintf("(%.3f, %.3f)", r_squared_ci[1], r_squared_ci[2])`. 
+
+For estimates of \(\log(\hat{\beta}_0 \cdot \hat{\beta}_1)\), the 95% confidence interval is `r sprintf("(%.3f, %.3f)", log_beta_product_ci[1], log_beta_product_ci[2])`.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
