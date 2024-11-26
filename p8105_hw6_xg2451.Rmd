@@ -92,6 +92,96 @@ For estimates of \(r^2\), the 95% confidence interval is `r sprintf("(%.3f, %.3f
 
 For estimates of \(\log(\hat{\beta}_0 \cdot \hat{\beta}_1)\), the 95% confidence interval is `r sprintf("(%.3f, %.3f)", log_beta_product_ci[1], log_beta_product_ci[2])`.
 
+# Problem 2
+
+#### Data preparation
+```{r message=FALSE, warning=FALSE}
+homicide_data = read_csv("data/homicide-data.csv")
+homicide_data <- homicide_data |> 
+  mutate(
+    city_state = paste(city, state, sep = ", "), # Create city_state variable
+    victim_age = as.numeric(victim_age) # Ensure victim_age is numeric
+  ) |>
+  filter(
+    !(city_state %in% c('Dallas, TX', 'Phoenix, AZ', 'Kansas City, MO', 'Tulsa, AL')), # Exclude cities by city_state
+    victim_race %in% c("White", "Black") # Keep only White and Black victims
+  )
+```
+
+#### Logistic Regression for Baltimore, MD
+```{r}
+# Filter data for Baltimore, MD
+baltimore_data <- homicide_data |> 
+  filter(city_state == "Baltimore, MD")
+
+# Fit logistic regression model
+baltimore_model <- glm(
+  disposition == "Closed by arrest" ~ victim_age + victim_sex + victim_race,
+  data = baltimore_data,
+  family = binomial()
+)
+
+# Extract ORs and confidence intervals
+baltimore_results <-
+  baltimore_model|> 
+  broom::tidy(conf.int = TRUE, exponentiate = TRUE)|>
+  mutate(CI = paste0('(', round(conf.low,3),', ', round(conf.high,3),')')) |> 
+  filter(term == "victim_sexMale") |>
+  select(OR = estimate, CI) 
+
+baltimore_results |> 
+  knitr::kable(digits = 3)
+```
+The estimate and 95% confidence interval of the adjusted odds ratio
+are 0.426 and (0.324, 0.558) for solving homicides comparing male
+victims to female victims keeping all other variables fixed.
+
+#### Logistic Regression for All Cities
+```{r warning=FALSE}
+library(purrr)
+# Fit logistic regression for each city
+city_results <- homicide_data |>
+  group_by(city_state) |>
+  nest() |>
+  mutate(
+    models = map(data, \(df) glm(
+      disposition == "Closed by arrest" ~ victim_age + victim_sex + victim_race,
+      data = df,
+      family = binomial()
+    )),
+    results = map(models, \(mod) broom::tidy(mod, exponentiate = TRUE, conf.int = TRUE))
+  ) |>
+  unnest(results) |>
+  filter(term == "victim_sexMale")
+
+# Filter and select only the relevant columns
+city_results_summary <- city_results |>
+  select(city_state, OR = estimate, conf.low, conf.high) 
+
+city_results_summary |> 
+  knitr::kable(digits = 3)
+```
+#### Plot Estimated ORs and Confidence Intervals
+```{r}
+plot_data <- city_results |> 
+  select(city_state, estimate, conf.low, conf.high) |>
+  arrange(estimate)
+
+# Plot
+ggplot(plot_data, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +
+  labs(
+    title = "Adjusted Odds Ratios for Male vs. Female Victims",
+    x = "City",
+    y = "Odds Ratio (Male vs Female)"
+  )
+```
+
+**Comment:**
+
+The plot shows the adjusted odds ratios (ORs) for solving homicides involving male victims compared to female victims across cities. Most ORs hover around 1, suggesting little difference in likelihood for many cities. However, there are cities with ORs significantly above 1 (e.g., Albuquerque, NM) and others with ORs below 1, indicating differences in solving rates between male and female victims. The wide confidence intervals for some cities indicate higher uncertainty, likely due to smaller sample sizes.
 
 
 
